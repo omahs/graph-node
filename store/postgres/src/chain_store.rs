@@ -595,7 +595,7 @@ mod data {
             &self,
             conn: &PgConnection,
             hash: &BlockHash,
-        ) -> Result<Option<(BlockNumber, Option<String>)>, StoreError> {
+        ) -> Result<Option<(BlockNumber, Option<u64>)>, StoreError> {
             const TIMESTAMP_QUERY: &str =
                 "coalesce(data->'block'->>'timestamp', data->>'timestamp')";
 
@@ -617,12 +617,30 @@ mod data {
                     .optional()?,
             };
 
+            fn try_to_int(ts: Option<String>) -> Result<Option<u64>, StoreError> {
+                let ts = match ts {
+                    Some(str) => str,
+                    None => return Ok(None),
+                };
+
+                let radix = if ts.starts_with("0x") { 16 } else { 10 };
+
+                u64::from_str_radix(&ts[2..], radix)
+                    .map_err(|err| {
+                        StoreError::QueryExecutionError(format!(
+                            "unexpected timestamp format {}, err: {}",
+                            ts, err
+                        ))
+                    })
+                    .map(Some)
+            }
+
             match number {
                 None => Ok(None),
                 Some((number, ts)) => {
                     let number = BlockNumber::try_from(number)
                         .map_err(|e| StoreError::QueryExecutionError(e.to_string()))?;
-                    Ok(Some((number, ts)))
+                    Ok(Some((number, try_to_int(ts)?)))
                 }
             }
         }
@@ -1701,7 +1719,7 @@ impl ChainStoreTrait for ChainStore {
     async fn block_number(
         &self,
         hash: &BlockHash,
-    ) -> Result<Option<(String, BlockNumber, Option<String>)>, StoreError> {
+    ) -> Result<Option<(String, BlockNumber, Option<u64>)>, StoreError> {
         let hash = hash.clone();
         let storage = self.storage.clone();
         let chain = self.chain.clone();
